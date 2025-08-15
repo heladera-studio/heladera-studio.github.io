@@ -1,0 +1,644 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Ice Cream Seller – Power-Ups + Themes + Wobbly Scoops</title>
+<style>
+  :root{
+    --text:#e7ecff;
+  }
+  html,body{height:100%}
+  body{
+    margin:0;
+    font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial, "Noto Color Emoji", "Apple Color Emoji", "Segoe UI Emoji";
+    display:flex; align-items:center; justify-content:center;
+    background:#0b0e1a;
+  }
+  .frame{
+    padding:12px; border-radius:16px;
+    background: linear-gradient(145deg, rgba(255,255,255,0.05), rgba(255,255,255,0));
+    box-shadow: 0 0 0 1px rgba(124,246,255,0.12), 0 20px 60px rgba(0,0,0,0.45), inset 0 0 40px rgba(124,246,255,0.03);
+  }
+  canvas{
+    display:block;
+    border-radius:12px;
+    box-shadow: 0 0 0 1px rgba(255,255,255,0.06), 0 12px 30px rgba(0,0,0,0.45);
+    background:#0e1322;
+  }
+  .caption{
+    position:fixed; bottom:18px; width:100%; text-align:center;
+    color:var(--text); opacity:.85; font-size:12px; letter-spacing:.35px; user-select:none;
+  }
+</style>
+</head>
+<body>
+  <div class="frame">
+    <canvas id="game" width="800" height="300"></canvas>
+  </div>
+  <div class="caption">
+    Tap or press <b>Space</b>/<b>↑</b> to jump • Double jump • Power-ups: 🛡️ shield, 🍒 +1 scoop, ✨ x2 points • Levels rotate
+  </div>
+
+<script>
+(() => {
+  const DPR = Math.max(1, Math.floor(window.devicePixelRatio || 1));
+  const canvas = document.getElementById('game');
+  const ctx = canvas.getContext('2d');
+
+  function scaleCanvas() {
+    const w = canvas.width, h = canvas.height;
+    canvas.style.width = w + "px";
+    canvas.style.height = h + "px";
+    canvas.width = w * DPR;
+    canvas.height = h * DPR;
+    ctx.setTransform(DPR,0,0,DPR,0,0);
+  }
+  scaleCanvas();
+
+  // ====== WORLD & PLAYER ======
+  const GROUND_Y = 235;
+  const GRAVITY = 0.62;
+  const JUMP_VY_1 = -12.5;
+  const JUMP_VY_2 = -11.0;
+
+  // Bigger seller
+  const PLAYER = { x: 56, y: GROUND_Y - 48, w: 36, h: 48, vy: 0, grounded: true, jumpsLeft: 2 };
+
+  // ====== GAME STATE ======
+  let baseSpeed = 4.2;              // starts slowish
+  let speed = baseSpeed;
+  let score = 0;
+  let best = 0;
+
+  // Emoji scoops (lives) — top is last element
+  const SCOOP_SET = ["🍦","🍧","🍨"];
+  let scoops = [...SCOOP_SET];
+  let fallingScoops = [];
+
+  let obstacles = [];
+  let powerups = [];
+  let playing = true;
+  let gameOver = false;
+  let t = 0;
+  let invulnUntil = 0;
+
+  // Power-up states
+  const powerState = {
+    shieldUntil: 0,   // frames
+    doubleUntil: 0,   // frames
+  };
+
+  // ====== THEMES ======
+  // Three themes that auto-rotate every ~45s
+  const THEME_DURATION = 45 * 60; // frames at ~60fps
+  const THEMES = [
+    {
+      name: "Neon City",
+      bgA: "#1f2b56", bgB: "#0b0e1a", bgC: "#141a2b",
+      horizonTop: "rgba(255,115,210,0.14)",
+      groundGlow: "rgba(124,246,255,0.6)",
+      particles: "stars", // twinkling
+    },
+    {
+      name: "Beach Boardwalk",
+      bgA: "#ffb36b", bgB: "#302644", bgC: "#1a1233",
+      horizonTop: "rgba(255,214,102,0.18)",
+      groundGlow: "rgba(255,184,120,0.6)",
+      particles: "bokeh", // warm circles
+    },
+    {
+      name: "Snowy Fair",
+      bgA: "#5aa7ff", bgB: "#0a0f1e", bgC: "#0a0f1e",
+      horizonTop: "rgba(160,210,255,0.18)",
+      groundGlow: "rgba(180,220,255,0.65)",
+      particles: "snow", // drifting snow
+    },
+  ];
+  function currentTheme() {
+    const idx = Math.floor((t / THEME_DURATION)) % THEMES.length;
+    return THEMES[idx];
+  }
+
+  // ====== PARTICLES (stars/bokeh/snow) ======
+  const skyItems = Array.from({length: 60}, () => ({
+    x: Math.random() * canvas.width / DPR,
+    y: Math.random() * (GROUND_Y - 40),
+    r: Math.random() * 1.2 + 0.3,
+    tw: Math.random() * Math.PI * 2,
+    vy: 0.3 + Math.random()*0.4,     // for snow/bokeh slow fall
+    alpha: 0.5 + Math.random()*0.5,
+  }));
+
+  function rand(min, max){ return Math.random() * (max - min) + min; }
+
+  const glows = [
+    "rgba(255,115,210,0.55)", // pink
+    "rgba(124,246,255,0.55)", // cyan
+    "rgba(255,216,107,0.55)", // gold
+    "rgba(170,255,140,0.55)"  // lime
+  ];
+  const coneEmojis = ["🍦","🍧","🍨"]; // obstacles
+
+  // ====== OBSTACLES ======
+  function spawnObstacle() {
+    const size = Math.round(rand(22, 42));
+    obstacles.push({
+      x: canvas.width / DPR + 12,
+      y: GROUND_Y - size,
+      size,
+      w: size * 0.72,
+      h: size * 0.9,
+      rot: rand(-0.08, 0.08),
+      glow: glows[Math.floor(Math.random() * glows.length)],
+      emoji: coneEmojis[Math.floor(Math.random() * coneEmojis.length)]
+    });
+  }
+
+  // ====== POWER-UPS ======
+  // Types: shield (🛡️), cherry (🍒), double points (✨)
+  const POWER_TYPES = [
+    {key:"shield", emoji:"🛡️", color:"rgba(124,246,255,0.85)", duration: 6*60},
+    {key:"cherry", emoji:"🍒", color:"rgba(255,115,210,0.85)", duration: 0},  // instant +1 scoop
+    {key:"double", emoji:"✨", color:"rgba(255,216,107,0.9)", duration: 10*60},
+  ];
+
+  function spawnPowerup() {
+    const type = POWER_TYPES[Math.floor(Math.random()*POWER_TYPES.length)];
+    const size = 26;
+    powerups.push({
+      x: canvas.width / DPR + 12,
+      y: GROUND_Y - size - rand(10, 30), // float a bit above ground
+      size,
+      w: size * 0.8,
+      h: size * 0.9,
+      vx: -speed,
+      type,
+      glow: type.color,
+      bobT: Math.random()*Math.PI*2, // gentle bob
+    });
+  }
+
+  function applyPowerup(p){
+    if (p.type.key === "shield"){
+      powerState.shieldUntil = Math.max(powerState.shieldUntil, t + p.type.duration);
+    } else if (p.type.key === "cherry"){
+      if (scoops.length < 3){
+        // add back the next missing scoop in original order
+        const next = SCOOP_SET[scoops.length]; // 0->🍦,1->🍧,2->🍨
+        scoops.push(next);
+      }
+    } else if (p.type.key === "double"){
+      powerState.doubleUntil = Math.max(powerState.doubleUntil, t + p.type.duration);
+    }
+  }
+
+  // ====== RESET ======
+  function reset() {
+    best = Math.max(best, Math.floor(score));
+    score = 0;
+    baseSpeed = 4.2;
+    speed = baseSpeed;
+    obstacles = [];
+    powerups = [];
+    fallingScoops = [];
+    scoops = [...SCOOP_SET];
+    PLAYER.y = GROUND_Y - PLAYER.h;
+    PLAYER.vy = 0;
+    PLAYER.grounded = true;
+    PLAYER.jumpsLeft = 2;
+    gameOver = false;
+    playing = true;
+    invulnUntil = 0;
+    powerState.shieldUntil = 0;
+    powerState.doubleUntil = 0;
+  }
+
+  // ====== INPUT ======
+  function jump() {
+    if (gameOver) return;
+    if (PLAYER.jumpsLeft > 0){
+      const first = (PLAYER.jumpsLeft === 2);
+      PLAYER.vy = first ? JUMP_VY_1 : JUMP_VY_2;
+      PLAYER.grounded = false;
+      PLAYER.jumpsLeft--;
+      for (let i=0;i<10;i++) particles.push(makeParticle(PLAYER.x+18, PLAYER.y+PLAYER.h-2, first));
+    }
+  }
+
+  // ====== UTILS ======
+  function rectsIntersect(a,b){
+    return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
+  }
+
+  // ====== FALLING SCOOPS ======
+  function dropScoopFromHand(emoji){
+    const stackCount = scoops.length; // after pop
+    const baseX = PLAYER.x + 24;
+    const baseY = PLAYER.y + PLAYER.h - 12;
+    const dyStep = 14;
+    const startX = baseX;
+    const startY = baseY - 22 - (stackCount * dyStep);
+
+    fallingScoops.push({
+      x: startX,
+      y: startY,
+      vx: rand(-1.2, 1.2),
+      vy: -2.0,
+      rot: rand(-0.2, 0.2),
+      rvel: rand(-0.04, 0.04),
+      ground: false,
+      glow: glows[Math.floor(Math.random() * glows.length)],
+      emoji,
+      life: 120
+    });
+  }
+
+  function updateFallingScoops(){
+    for (const c of fallingScoops){
+      if (!c.ground){
+        c.vy += 0.35;
+        c.x += c.vx;
+        c.y += c.vy;
+        c.rot += c.rvel;
+        if (c.y >= GROUND_Y - 6){
+          c.y = GROUND_Y - 6;
+          c.vx *= 0.6;
+          c.vy = 0;
+          c.ground = true;
+        }
+      } else {
+        c.life--;
+      }
+    }
+    for (let i = fallingScoops.length - 1; i >= 0; i--){
+      if (fallingScoops[i].life <= 0) fallingScoops.splice(i,1);
+    }
+  }
+
+  function drawFallingScoops(){
+    for (const c of fallingScoops){
+      ctx.save();
+      ctx.translate(c.x, c.y);
+      ctx.rotate(c.rot);
+      ctx.font = "20px Apple Color Emoji, Segoe UI Emoji, Noto Color Emoji, sans-serif";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.shadowColor = c.glow;
+      ctx.shadowBlur = 10;
+      if (c.ground) ctx.globalAlpha = Math.max(0, c.life/120);
+      ctx.fillText(c.emoji, 0, 0);
+      ctx.shadowBlur = 0;
+      ctx.restore();
+    }
+  }
+
+  // ====== PARTICLE DUST ======
+  const particles = [];
+  function makeParticle(x,y,strong){
+    return {x, y, vx: rand(-1.2,1.2), vy: rand(strong?-2.2:-1.6, -0.4), life: rand(18,30)};
+  }
+  function updateParticles(){
+    for (const p of particles){
+      p.x += p.vx; p.y += p.vy; p.vy += 0.18; p.life--;
+    }
+    for (let i=particles.length-1;i>=0;i--){
+      if (particles[i].life<=0) particles.splice(i,1);
+    }
+  }
+  function drawParticles(){
+    ctx.save();
+    ctx.fillStyle = "rgba(255,216,107,0.85)";
+    for (const p of particles){
+      ctx.globalAlpha = Math.max(0, p.life/30);
+      ctx.fillRect(p.x, p.y, 2, 2);
+    }
+    ctx.restore();
+  }
+
+  // ====== RENDERING ======
+  function drawBackground() {
+    const theme = currentTheme();
+    // layered gradient background
+    const grad1 = ctx.createLinearGradient(0, 0, 0, canvas.height/DPR);
+    grad1.addColorStop(0, theme.bgA);
+    grad1.addColorStop(0.5, theme.bgB);
+    grad1.addColorStop(1, theme.bgC);
+    ctx.fillStyle = grad1;
+    ctx.fillRect(0,0, canvas.width/DPR, canvas.height/DPR);
+
+    // theme particles
+    if (theme.particles === "stars"){
+      for (const s of skyItems){
+        s.tw += 0.02;
+        const twinkle = 0.6 + Math.sin(s.tw) * 0.4;
+        ctx.beginPath();
+        ctx.arc(s.x, s.y, s.r * twinkle, 0, Math.PI*2);
+        ctx.fillStyle = "rgba(255,255,255,0.75)";
+        ctx.fill();
+      }
+    } else if (theme.particles === "bokeh"){
+      for (const b of skyItems){
+        b.y += b.vy * 0.1; if (b.y > GROUND_Y-10) b.y = rand(0, GROUND_Y-60);
+        ctx.beginPath();
+        ctx.arc(b.x, b.y, b.r*3, 0, Math.PI*2);
+        ctx.fillStyle = `rgba(255,214,170,${0.05 + b.alpha*0.05})`;
+        ctx.fill();
+      }
+    } else if (theme.particles === "snow"){
+      for (const flake of skyItems){
+        flake.y += flake.vy * 0.6;
+        flake.x += Math.sin((flake.y + t*0.5)/25) * 0.2;
+        if (flake.y > GROUND_Y-8) { flake.y = rand(0, 20); flake.x = rand(0, canvas.width/DPR); }
+        ctx.beginPath();
+        ctx.arc(flake.x, flake.y, flake.r*1.5, 0, Math.PI*2);
+        ctx.fillStyle = "rgba(240,250,255,0.85)";
+        ctx.fill();
+      }
+    }
+
+    // horizon glow
+    const grad2 = ctx.createLinearGradient(0, GROUND_Y-40, 0, GROUND_Y+30);
+    grad2.addColorStop(0, currentTheme().horizonTop);
+    grad2.addColorStop(1, "rgba(14,19,34,0)");
+    ctx.fillStyle = grad2;
+    ctx.fillRect(0, GROUND_Y-60, canvas.width / DPR, 90);
+  }
+
+  function drawGround() {
+    ctx.lineWidth = 2;
+    ctx.strokeStyle = currentTheme().groundGlow.replace("0.65","0.5");
+    ctx.shadowColor = currentTheme().groundGlow;
+    ctx.shadowBlur = 8;
+    ctx.beginPath();
+    ctx.moveTo(0, GROUND_Y);
+    ctx.lineTo(canvas.width / DPR, GROUND_Y);
+    ctx.stroke();
+    ctx.shadowBlur = 0;
+  }
+
+  function drawPlayer() {
+    // flicker during i-frames
+    const flashing = (t < invulnUntil) && (Math.floor(t/4) % 2 === 0);
+    if (flashing) return;
+
+    // seller
+    ctx.save();
+    ctx.font = "40px Apple Color Emoji, Segoe UI Emoji, Noto Color Emoji, sans-serif";
+    ctx.textBaseline = "bottom";
+    ctx.shadowColor = "rgba(255,216,107,0.55)";
+    ctx.shadowBlur = 6;
+    ctx.fillText("👩‍🍳", PLAYER.x, PLAYER.y + PLAYER.h - 2);
+    ctx.shadowBlur = 0;
+    ctx.restore();
+
+    // cone base in hand (slightly larger)
+    const baseX = PLAYER.x + 24;
+    const baseY = PLAYER.y + PLAYER.h - 12;
+    ctx.save();
+    ctx.font = "24px Apple Color Emoji, Segoe UI Emoji, Noto Color Emoji, sans-serif";
+    ctx.fillText("🍦", baseX, baseY);
+    ctx.restore();
+
+    // WOBBLY scoops stacked on top
+    const dyStep = 14;
+    const scoopFont = "20px Apple Color Emoji, Segoe UI Emoji, Noto Color Emoji, sans-serif";
+    for (let i = 0; i < scoops.length; i++){
+      // horizontal wobble based on time + index
+      const wob = Math.sin((t*0.18) + i*0.9) * 1.8; // gentle sway
+      const sx = baseX + wob;
+      const sy = baseY - 22 - i*dyStep;
+      ctx.save();
+      ctx.font = scoopFont;
+      ctx.fillText(scoops[i], sx, sy);
+      ctx.restore();
+    }
+
+    // Shield shimmer if active
+    if (t < powerState.shieldUntil){
+      ctx.save();
+      ctx.globalAlpha = 0.6;
+      ctx.strokeStyle = "rgba(124,246,255,0.8)";
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      const cx = PLAYER.x + PLAYER.w*0.45;
+      const cy = PLAYER.y + PLAYER.h*0.55;
+      ctx.arc(cx, cy, 28 + Math.sin(t*0.2)*1.5, 0, Math.PI*2);
+      ctx.stroke();
+      ctx.restore();
+    }
+  }
+
+  function drawObstacle(o) {
+    ctx.save();
+    ctx.translate(o.x + o.w/2, o.y + o.h/2);
+    ctx.rotate(o.rot);
+    ctx.font = `${o.size}px Apple Color Emoji, Segoe UI Emoji, Noto Color Emoji, sans-serif`;
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.shadowColor = "rgba(255,115,210,0.55)";
+    ctx.shadowBlur = 10;
+    ctx.fillText(o.emoji, 0, 0);
+    ctx.shadowBlur = 0;
+    ctx.restore();
+  }
+
+  function drawPowerup(p){
+    ctx.save();
+    ctx.translate(p.x + p.w/2, p.y + p.h/2 + Math.sin((p.bobT+=0.06))*2);
+    ctx.font = `${p.size}px Apple Color Emoji, Segoe UI Emoji, Noto Color Emoji, sans-serif`;
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.shadowColor = p.glow;
+    ctx.shadowBlur = 12;
+    ctx.fillText(p.type.emoji, 0, 0);
+    ctx.shadowBlur = 0;
+    ctx.restore();
+  }
+
+  // ====== LOOP ======
+  function loop(){
+    requestAnimationFrame(loop);
+    t += 1;
+
+    // Speed scales with score (smooth ramp)
+    speed = baseSpeed + 0.03 * Math.sqrt(score);
+
+    if (playing && !gameOver){
+      const pointsMult = (t < powerState.doubleUntil) ? 2 : 1;
+      score += 0.13 * pointsMult;
+
+      // Physics
+      PLAYER.vy += GRAVITY;
+      PLAYER.y += PLAYER.vy;
+      if (PLAYER.y >= GROUND_Y - PLAYER.h){
+        PLAYER.y = GROUND_Y - PLAYER.h;
+        PLAYER.vy = 0;
+        if (!PLAYER.grounded){
+          for (let i=0;i<10;i++) particles.push(makeParticle(PLAYER.x+18, GROUND_Y-2, false));
+        }
+        PLAYER.grounded = true;
+        PLAYER.jumpsLeft = 2;
+      }
+
+      // Spawning – fair gaps scale with speed
+      const minGap = Math.max(170, 150 + (speed*10));
+      const last = obstacles[obstacles.length-1];
+      const canSpawnObs = !last || (last.x < (canvas.width / DPR - minGap));
+      if (canSpawnObs && Math.random() < 0.024) {
+        spawnObstacle();
+        // occasional follow-up cone with fair gap
+        if (Math.random() < 0.25){
+          const ghost = {...obstacles[obstacles.length-1]};
+          ghost.x += rand(95, 135);
+          ghost.size = Math.round(rand(22, 38));
+          ghost.w = ghost.size * 0.72; ghost.h = ghost.size * 0.9;
+          ghost.emoji = coneEmojis[Math.floor(Math.random()*coneEmojis.length)];
+          obstacles.push(ghost);
+        }
+      }
+
+      // Power-up spawn (rare & fair)
+      const lastPU = powerups[powerups.length-1];
+      const canSpawnPU = !lastPU || (lastPU.x < canvas.width/DPR - 280);
+      if (canSpawnPU && Math.random() < 0.008){
+        spawnPowerup();
+      }
+    }
+
+    // Move obstacles & powerups with world speed
+    for (const o of obstacles){
+      o.x += -speed * (0.98 + Math.random()*0.02);
+    }
+    obstacles = obstacles.filter(o => o.x + o.w > -20);
+
+    for (const p of powerups){
+      p.x += -speed;
+    }
+    powerups = powerups.filter(p => p.x + p.w > -20);
+
+    // Collisions with obstacles (respect shield & i-frames)
+    if (!gameOver){
+      // powerup pickups
+      for (let i=powerups.length-1;i>=0;i--){
+        const p = powerups[i];
+        const hitPU = rectsIntersect(PLAYER, {x:p.x, y:p.y, w:p.w, h:p.h});
+        if (hitPU){
+          applyPowerup(p);
+          powerups.splice(i,1);
+        }
+      }
+
+      // obstacle collisions
+      if (t > invulnUntil){
+        for (let i=0;i<obstacles.length;i++){
+          const o = obstacles[i];
+          const box = {x:o.x, y:o.y, w:o.w, h:o.h};
+          if (rectsIntersect(PLAYER, box)){
+            // If shield, consume obstacle and grant brief invuln
+            if (t < powerState.shieldUntil){
+              invulnUntil = t + 30; // small jitter window after hit
+              obstacles.splice(i,1);
+              break;
+            }
+            // Otherwise, lose a scoop
+            if (scoops.length > 0){
+              const fallen = scoops.pop();
+              dropScoopFromHand(fallen);
+              invulnUntil = t + 75;
+              PLAYER.vy = -6;
+              obstacles.splice(i,1);
+              if (scoops.length === 0){
+                gameOver = true;
+                playing = false;
+                best = Math.max(best, Math.floor(score));
+              }
+            }
+            break;
+          }
+        }
+      }
+    }
+
+    // DRAW
+    ctx.clearRect(0,0, canvas.width / DPR, canvas.height / DPR);
+    drawBackground();
+    drawGround();
+    drawParticles();
+    drawFallingScoops();
+    obstacles.forEach(drawObstacle);
+    powerups.forEach(drawPowerup);
+    drawPlayer();
+
+    // HUD
+    ctx.save();
+    ctx.fillStyle = "#e7ecff";
+    ctx.shadowColor = "rgba(124,246,255,0.5)";
+    ctx.shadowBlur = 10;
+    ctx.font = "bold 16px ui-sans-serif, system-ui";
+    ctx.fillText(`Score: ${Math.floor(score)}`, 14, 22);
+    ctx.fillText(`Best: ${best}`, 14, 42);
+
+    // Lives: show scoops in HUD (remaining)
+    ctx.font = "20px Apple Color Emoji, Segoe UI Emoji, Noto Color Emoji, sans-serif";
+    ctx.fillText(scoops.join(""), 100, 22);
+
+    // Theme name
+    ctx.font = "12px ui-sans-serif, system-ui";
+    ctx.globalAlpha = 0.85;
+    ctx.fillText(currentTheme().name, canvas.width/DPR - 120, 22);
+    ctx.globalAlpha = 1;
+
+    // Power-up timers
+    ctx.font = "14px ui-sans-serif, system-ui";
+    let xHUD = 200;
+    if (t < powerState.shieldUntil){
+      const secs = Math.max(0, Math.ceil((powerState.shieldUntil - t)/60));
+      ctx.fillText(`🛡️ ${secs}s`, xHUD, 22); xHUD += 70;
+    }
+    if (t < powerState.doubleUntil){
+      const secs = Math.max(0, Math.ceil((powerState.doubleUntil - t)/60));
+      ctx.fillText(`✨x2 ${secs}s`, xHUD, 22); xHUD += 90;
+    }
+
+    if (gameOver){
+      const msg = "All scoops lost! Tap or Press Space to Restart";
+      ctx.font = "bold 16px ui-sans-serif, system-ui";
+      const w = ctx.measureText(msg).width;
+      const x = (canvas.width / DPR - w)/2;
+      ctx.fillStyle = "#ffd86b";
+      ctx.shadowColor = "rgba(255,216,107,0.45)";
+      ctx.shadowBlur = 12;
+      ctx.fillText(msg, x, 64);
+      ctx.shadowBlur = 0;
+    }
+    ctx.restore();
+
+    // updates
+    updateParticles();
+    updateFallingScoops();
+  }
+  loop();
+
+  // Input
+  window.addEventListener('keydown', e => {
+    if (e.code === 'Space' || e.code === 'ArrowUp'){
+      if (gameOver) reset(); else jump();
+    }
+  });
+  canvas.addEventListener('pointerdown', () => {
+    if (gameOver) reset(); else jump();
+  });
+
+  // Handle resize DPR changes
+  let resizeTimer;
+  window.addEventListener('resize', () => {
+    clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(() => {
+      scaleCanvas();
+    }, 150);
+  });
+})();
+</script>
+</body>
+</html>
