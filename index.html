@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>🎮 Mis Mini‑juegos</title>
+  <meta name="description" content="Colección de mini‑juegos en GitHub Pages" />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='0.9em' font-size='90'>🎮</text></svg>">
+  <style>
+    :root{--bg:#0b1223;--fg:#e5f2ff;--muted:#9fb3cc;--card:#0f1a30;--line:#20304d;--accent:#38bdf8}
+    *{box-sizing:border-box}
+    body{margin:0;min-height:100vh;display:flex;flex-direction:column;gap:20px;align-items:center;background:linear-gradient(180deg,#070d1a,#0b1223);color:var(--fg);font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
+    header{width:min(1000px,92vw);margin-top:28px;display:flex;justify-content:space-between;align-items:end;gap:12px}
+    h1{margin:0;font-size:clamp(1.2rem,3vw,1.8rem)}
+    p.sub{margin:6px 0 0;color:var(--muted)}
+    .grid{width:min(1000px,92vw);display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:16px}
+    .card{position:relative;border:1px solid var(--line);background:linear-gradient(160deg,rgba(56,189,248,.10),transparent),var(--card);border-radius:16px;overflow:hidden;display:flex;flex-direction:column;transition:transform .15s ease, border-color .15s ease}
+    .card:hover{transform:translateY(-2px);border-color:#31517a}
+    .thumb{display:grid;place-items:center;aspect-ratio:16/9;border-bottom:1px solid var(--line);font-size:56px}
+    .content{padding:12px 14px}
+    .title{margin:0 0 6px;font-weight:600}
+    .meta{margin:0;color:var(--muted);font-size:.9rem}
+    .btn{appearance:none;border:1px solid var(--line);background:transparent;color:var(--fg);padding:.5rem .8rem;border-radius:10px;cursor:pointer}
+    .btn:hover{border-color:var(--accent)}
+    footer{width:min(1000px,92vw);margin:10px 0 32px;color:var(--muted);text-align:center;font-size:.95rem}
+    a{color:inherit;text-decoration:none}
+    .row{display:flex;gap:10px;flex-wrap:wrap}
+  </style>
+</head>
+<body>
+  <header>
+    <div>
+      <h1>🎮 Mis Mini‑juegos</h1>
+      <p class="sub">Un hub con varios juegos HTML5 alojados en GitHub Pages</p>
+    </div>
+    <div class="row">
+      <a class="btn" href="https://github.com/USUARIO/REPO" target="_blank" rel="noopener">⭐ Repo</a>
+    </div>
+  </header>
+
+  <main class="grid">
+    <!-- JUEGO 1: PONG HELADO -->
+    <a class="card" href="pong/" aria-label="Abrir Pong Helado">
+      <div class="thumb" aria-hidden="true">🍦🏓</div>
+      <div class="content">
+        <h3 class="title">Pong Helado</h3>
+        <p class="meta">Dos jugadores • Teclado y táctil</p>
+      </div>
+    </a>
+
+    <!-- JUEGO 2: SNAKE (placeholder) -->
+    <a class="card" href="snake/" aria-label="Abrir Snake" title="Ejemplo de carpeta para otro juego">
+      <div class="thumb" aria-hidden="true">🪱🍎</div>
+      <div class="content">
+        <h3 class="title">Snake</h3>
+        <p class="meta">Clásico de comer manzanas</p>
+      </div>
+    </a>
+
+    <!-- JUEGO 3: TETRIS (placeholder) -->
+    <a class="card" href="tetris/" aria-label="Abrir Tetris" title="Ejemplo de carpeta para otro juego">
+      <div class="thumb" aria-hidden="true">🧩</div>
+      <div class="content">
+        <h3 class="title">Tetris</h3>
+        <p class="meta">Piezas y líneas</p>
+      </div>
+    </a>
+  </main>
+
+  <footer>
+    Sube cada juego en su propia carpeta (por ej., <code>pong/index.html</code>). Puedes añadir más tarjetas copiando el bloque <code>.card</code>.
+  </footer>
+</body>
+</html>
