@@ -1,0 +1,385 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Memory — HTML, CSS y JS</title>
+  <style>
+    :root {
+      --bg: #0f172a;          /* slate-900 */
+      --panel: #111827;       /* gray-900 */
+      --card: #1f2937;        /* gray-800 */
+      --card-face: #0ea5e9;   /* sky-500 */
+      --accent: #22d3ee;      /* cyan-400 */
+      --ok: #10b981;          /* emerald-500 */
+      --text: #e5e7eb;        /* gray-200 */
+      --muted: #94a3b8;       /* slate-400 */
+      --danger: #ef4444;      /* red-500 */
+      --radius: 16px;
+      --shadow: 0 10px 30px rgba(0,0,0,.35);
+    }
+
+    * { box-sizing: border-box; }
+    html, body { height: 100%; }
+    body {
+      margin: 0;
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, "Helvetica Neue", Arial, "Noto Sans", "Apple Color Emoji", "Segoe UI Emoji";
+      background: radial-gradient(1200px 800px at 10% 20%, #0b1026, var(--bg));
+      color: var(--text);
+      display: grid;
+      place-items: center;
+      padding: 20px;
+    }
+
+    .app {
+      width: min(100%, 900px);
+      display: grid;
+      gap: 18px;
+    }
+
+    header {
+      display: grid;
+      gap: 12px;
+      text-align: center;
+    }
+    h1 {
+      margin: 0;
+      font-size: clamp(1.3rem, 1rem + 2vw, 2rem);
+      letter-spacing: .5px;
+    }
+    .controls {
+      display: grid;
+      grid-template-columns: 1fr auto auto auto;
+      gap: 10px;
+      align-items: center;
+      background: linear-gradient(180deg, rgba(255,255,255,.03), rgba(255,255,255,.01));
+      padding: 12px;
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      border: 1px solid rgba(255,255,255,.05);
+    }
+    .stat { color: var(--muted); font-size: .95rem; }
+
+    button, select {
+      background: var(--panel);
+      color: var(--text);
+      border: 1px solid rgba(255,255,255,.1);
+      border-radius: 10px;
+      padding: 10px 14px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: transform .06s ease, background .2s ease, border-color .2s ease;
+    }
+    button:hover { background: #0b1222; }
+    button:active { transform: translateY(1px) scale(.99); }
+
+    /* Tablero */
+    .board {
+      display: grid;
+      gap: 12px;
+      background: linear-gradient(180deg, rgba(255,255,255,.03), rgba(255,255,255,.01));
+      padding: 14px;
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      border: 1px solid rgba(255,255,255,.05);
+    }
+
+    /* Haremos que la rejilla se adapte al tamaño elegido */
+    .grid-4 { grid-template-columns: repeat(4, 1fr); }
+    .grid-6 { grid-template-columns: repeat(6, 1fr); }
+
+    /* Carta */
+    .card {
+      position: relative;
+      width: 100%;
+      aspect-ratio: 3 / 4; /* mantiene proporción responsive */
+      perspective: 1000px;
+    }
+    .card > button {
+      position: absolute; inset: 0;
+      width: 100%; height: 100%;
+      border-radius: 14px;
+      background: var(--card);
+      display: grid; place-items: center;
+      font-size: clamp(1.6rem, .8rem + 3vw, 2.4rem);
+      transform-style: preserve-3d;
+      transform: rotateY(0deg);
+      transition: transform .5s ease;
+      outline: none;
+    }
+    .card.flipped > button { transform: rotateY(180deg); }
+    .face, .back {
+      position: absolute; inset: 0;
+      display: grid; place-items: center;
+      border-radius: 14px; backface-visibility: hidden;
+    }
+    .back {
+      background: linear-gradient(145deg, #0b1222, #111a33);
+      border: 1px solid rgba(255,255,255,.06);
+    }
+    .face {
+      background: var(--card-face);
+      color: #02243a;
+      transform: rotateY(180deg);
+      border: 2px solid rgba(255,255,255,.25);
+    }
+
+    .card.matched > button { box-shadow: 0 0 0 2px var(--ok) inset; }
+    .shake { animation: shake .4s linear; }
+    @keyframes shake {
+      10%, 90% { transform: translateX(-2px); }
+      20%, 80% { transform: translateX(4px); }
+      30%, 50%, 70% { transform: translateX(-6px); }
+      40%, 60% { transform: translateX(6px); }
+    }
+
+    /* Modal victoria */
+    dialog {
+      background: #0b1222;
+      color: var(--text);
+      border: 1px solid rgba(255,255,255,.1);
+      border-radius: 18px;
+      padding: 22px;
+      width: min(90vw, 460px);
+      box-shadow: var(--shadow);
+    }
+    dialog::backdrop { background: rgba(3, 6, 23, .6); }
+    .modal-actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 14px; }
+
+    footer { text-align: center; color: var(--muted); font-size: .9rem; }
+
+    @media (max-width: 640px) {
+      .controls { grid-template-columns: 1fr 1fr 1fr; }
+      .controls select { grid-column: 1 / -1; }
+    }
+  </style>
+</head>
+<body>
+  <div class="app" role="application" aria-label="Juego de memoria">
+    <header>
+      <h1>🧠 Juego de Memory</h1>
+      <div class="controls" aria-label="Controles del juego">
+        <div class="stat" id="moves">Movimientos: 0</div>
+        <div class="stat" id="time">Tiempo: 00:00</div>
+        <select id="size" aria-label="Tamaño del tablero">
+          <option value="4">Tablero 4×4 (fácil)</option>
+          <option value="6">Tablero 6×6 (intermedio)</option>
+        </select>
+        <button id="reset" aria-label="Reiniciar">Reiniciar</button>
+      </div>
+    </header>
+
+    <main id="board" class="board grid-4" aria-live="polite"></main>
+
+    <footer>
+      <small>Consejo: usa el teclado para navegar y Enter para voltear cartas.</small>
+    </footer>
+  </div>
+
+  <dialog id="win">
+    <h2>🎉 ¡Bien hecho!</h2>
+    <p id="summary"></p>
+    <div class="modal-actions">
+      <button id="closeWin">Cerrar</button>
+      <button id="playAgain">Jugar de nuevo</button>
+    </div>
+  </dialog>
+
+  <script>
+    // --- Configuración ---
+    const EMOJIS = [
+      '🍎','🍌','🍉','🍇','🍓','🍒','🍑','🍍',
+      '🥑','🥝','🥥','🌽','🥕','🍆','🫐','🍈',
+      '🐶','🐱','🦊','🐼','🐨','🐵','🦁','🐯',
+      '⚽','🏀','🏈','🎾','⚾','🏉','🥎','🥏',
+      '🚗','🚀','🚲','✈️','🚁','🛵','🚂','🛶'
+    ];
+
+    const state = {
+      size: 4,
+      deck: [],
+      first: null,
+      second: null,
+      lock: false,
+      moves: 0,
+      matches: 0,
+      startAt: null,
+      timerId: null
+    };
+
+    const $board = document.getElementById('board');
+    const $moves = document.getElementById('moves');
+    const $time = document.getElementById('time');
+    const $size = document.getElementById('size');
+    const $reset = document.getElementById('reset');
+    const $win = document.getElementById('win');
+    const $summary = document.getElementById('summary');
+    const $closeWin = document.getElementById('closeWin');
+    const $playAgain = document.getElementById('playAgain');
+
+    // --- Utilidades ---
+    function formatTime(ms) {
+      const total = Math.floor(ms / 1000);
+      const m = String(Math.floor(total / 60)).padStart(2, '0');
+      const s = String(total % 60).padStart(2, '0');
+      return `${m}:${s}`;
+    }
+
+    function shuffle(arr) {
+      // Fisher–Yates
+      for (let i = arr.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [arr[i], arr[j]] = [arr[j], arr[i]];
+      }
+      return arr;
+    }
+
+    function sampleEmojis(nPairs) {
+      const pool = [...EMOJIS];
+      shuffle(pool);
+      return pool.slice(0, nPairs);
+    }
+
+    // --- Render ---
+    function buildDeck(size) {
+      const pairs = (size * size) / 2; // número de parejas
+      const faces = sampleEmojis(pairs);
+      const deck = faces.flatMap((f, idx) => ([
+        { id: `${idx}-a`, face: f, pairId: idx },
+        { id: `${idx}-b`, face: f, pairId: idx },
+      ]));
+      return shuffle(deck);
+    }
+
+    function renderBoard() {
+      $board.classList.toggle('grid-4', state.size === 4);
+      $board.classList.toggle('grid-6', state.size === 6);
+      $board.innerHTML = '';
+
+      state.deck.forEach(card => {
+        const wrapper = document.createElement('div');
+        wrapper.className = 'card';
+        wrapper.dataset.id = card.id;
+        wrapper.dataset.pairId = card.pairId;
+
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'card-btn';
+        btn.setAttribute('aria-label', 'Carta oculta');
+        btn.setAttribute('aria-pressed', 'false');
+
+        const back = document.createElement('div');
+        back.className = 'back';
+        back.textContent = '❓';
+
+        const face = document.createElement('div');
+        face.className = 'face';
+        face.textContent = card.face;
+
+        btn.appendChild(back);
+        btn.appendChild(face);
+        wrapper.appendChild(btn);
+        $board.appendChild(wrapper);
+      });
+    }
+
+    // --- Juego ---
+    function reset(size = state.size) {
+      state.size = Number(size);
+      state.deck = buildDeck(state.size);
+      state.first = state.second = null;
+      state.lock = false;
+      state.moves = 0;
+      state.matches = 0;
+      state.startAt = performance.now();
+      if (state.timerId) cancelAnimationFrame(state.timerId);
+      tick();
+      $moves.textContent = 'Movimientos: 0';
+      renderBoard();
+    }
+
+    function flip($cardEl) {
+      if (!$cardEl || state.lock) return;
+      if ($cardEl.classList.contains('matched')) return;
+      if ($cardEl.classList.contains('flipped')) return; // ya está boca arriba
+
+      $cardEl.classList.add('flipped');
+      $cardEl.querySelector('button').setAttribute('aria-pressed', 'true');
+
+      if (!state.first) {
+        state.first = $cardEl;
+        return;
+      }
+
+      state.second = $cardEl;
+      state.lock = true;
+      state.moves++;
+      $moves.textContent = `Movimientos: ${state.moves}`;
+
+      const isMatch = state.first.dataset.pairId === state.second.dataset.pairId;
+      if (isMatch) {
+        state.first.classList.add('matched');
+        state.second.classList.add('matched');
+        afterTurn(true);
+      } else {
+        // animación de fallo
+        [state.first, state.second].forEach(el => el.classList.add('shake'));
+        setTimeout(() => {
+          [state.first, state.second].forEach(el => el.classList.remove('flipped','shake'));
+          [state.first, state.second].forEach(el => el.querySelector('button').setAttribute('aria-pressed', 'false'));
+          afterTurn(false);
+        }, 650);
+      }
+    }
+
+    function afterTurn(matched) {
+      if (matched) state.matches++;
+      state.first = state.second = null;
+      state.lock = false;
+
+      const totalPairs = (state.size * state.size) / 2;
+      if (state.matches === totalPairs) {
+        setTimeout(showWin, 350);
+      }
+    }
+
+    function showWin() {
+      const elapsed = performance.now() - state.startAt;
+      $summary.textContent = `Completaste un ${state.size}×${state.size} en ${formatTime(elapsed)} y ${state.moves} movimientos.`;
+      if (typeof $win.showModal === 'function') $win.showModal();
+      else alert($summary.textContent);
+    }
+
+    function tick(ts) {
+      const elapsed = (performance.now() - state.startAt) || 0;
+      $time.textContent = 'Tiempo: ' + formatTime(elapsed);
+      state.timerId = requestAnimationFrame(tick);
+    }
+
+    // --- Eventos ---
+    $board.addEventListener('click', (e) => {
+      const card = e.target.closest('.card');
+      if (!card) return;
+      flip(card);
+    });
+
+    // Navegación con teclado: Enter/Barra para voltear
+    $board.addEventListener('keydown', (e) => {
+      if (e.key !== 'Enter' && e.key !== ' ') return;
+      const card = e.target.closest('.card');
+      if (card) {
+        e.preventDefault();
+        flip(card);
+      }
+    });
+
+    $size.addEventListener('change', (e) => reset(Number(e.target.value)));
+    $reset.addEventListener('click', () => reset());
+    $closeWin.addEventListener('click', () => $win.close());
+    $playAgain.addEventListener('click', () => { $win.close(); reset(); });
+
+    // Iniciar
+    reset(4);
+  </script>
+</body>
+</html>
