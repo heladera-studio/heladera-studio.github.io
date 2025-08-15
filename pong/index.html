@@ -1,0 +1,374 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Pong — 2 Jugadores (Helado cambiante + Tarrinas)</title>
+<style>
+  :root{--bg:#0b1223;--fg:#e5f2ff;--accent:#38bdf8;--line:#1e293b;}
+  *{box-sizing:border-box}
+  body{margin:0;min-height:100vh;display:grid;place-items:center;background:linear-gradient(180deg,#070d1a,#0b1223);color:var(--fg);font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
+  .wrap{width:min(900px,96vw)}
+  header{display:flex;justify-content:space-between;align-items:center;margin:1rem 0 .5rem;gap:.75rem}
+  h1{margin:0;font-size:clamp(1rem,2vw,1.2rem);letter-spacing:.4px;opacity:.9}
+  .hud{display:flex;gap:.5rem;align-items:center;font-variant-numeric:tabular-nums;flex-wrap:wrap}
+  .btn{border:1px solid #334155;background:transparent;color:var(--fg);padding:.45rem .7rem;border-radius:.7rem;cursor:pointer}
+  .btn:hover{border-color:var(--accent)}
+  .canvas-wrap{position:relative;border:1px solid var(--line);border-radius:1rem;overflow:hidden;background:radial-gradient(1200px 600px at 50% -100px,rgba(56,189,248,.14),transparent),#0a1222;touch-action:none}
+  canvas{display:block;width:100%;height:auto;aspect-ratio:16/10;touch-action:none}
+  .overlay{position:absolute;inset:0;display:grid;place-items:center;text-align:center}
+  .overlay .panel{background:rgba(10,18,34,.6);backdrop-filter:blur(4px);border:1px solid #23314c;border-radius:1rem;padding:1rem 1.2rem;max-width:85%}
+  kbd{background:#0f1a30;border:1px solid #23314c;border-bottom-color:#1a2a44;border-radius:.4rem;padding:.05rem .35rem;font-family:ui-monospace,Consolas,monospace;font-size:.95em}
+  footer{opacity:.8;text-align:center;margin:.6rem 0 1rem;font-size:.9rem}
+</style>
+</head>
+<body>
+  <div class="wrap" id="app" tabindex="0">
+    <header>
+      <h1>🏓 Pong — Dos jugadores (🍦 Helado cambiante)</h1>
+      <div class="hud">
+        <div>Marcador: <strong id="scoreL">0</strong> — <strong id="scoreR">0</strong></div>
+        <button class="btn" id="serveBtn" aria-label="Sacar">▶ Sacar</button>
+        <button class="btn" id="pauseBtn" aria-label="Pausa/Reanudar">⏸︎ Pausa</button>
+        <button class="btn" id="resetBtn" aria-label="Reiniciar">↻ Reiniciar</button>
+      </div>
+    </header>
+
+    <div class="canvas-wrap">
+      <canvas id="game" width="800" height="500" aria-label="Zona de juego de Pong"></canvas>
+      <div class="overlay" id="overlay" role="button" aria-label="Toca para empezar">
+        <div class="panel">
+          <p style="margin:.2rem 0 .6rem">Toca/clica para sacar</p>
+          <p style="margin:.2rem 0">Arrastra en izquierda/derecha para mover tu tarrina</p>
+          <p style="margin:.2rem 0">Teclado: Izq <kbd>W/S</kbd> • Dcha <kbd>↑/↓</kbd></p>
+          <p style="margin:.6rem 0 0;opacity:.8;font-size:.9rem">Gana quien llegue a 10</p>
+        </div>
+      </div>
+    </div>
+
+    <footer>Listo para Netlify — súbelo como <code>index.html</code>.</footer>
+  </div>
+
+<script>
+(() => {
+  const canvas = document.getElementById('game');
+  const ctx = canvas.getContext('2d');
+  const overlay = document.getElementById('overlay');
+  const scoreLEl = document.getElementById('scoreL');
+  const scoreREl = document.getElementById('scoreR');
+  const serveBtn = document.getElementById('serveBtn');
+  const pauseBtn = document.getElementById('pauseBtn');
+  const resetBtn = document.getElementById('resetBtn');
+  const app = document.getElementById('app');
+
+  // Configuración
+  const W = canvas.width, H = canvas.height;
+  const PADDLE_W = 36, PADDLE_H = 90, PADDLE_MARGIN = 18, PADDLE_SPEED = 6;
+  const BALL_SIZE = 34;
+  const BALL_SPEED = 5, SPEED_INC = 1.04;
+  const WIN_SCORE = 10;
+
+  // Estado
+  const keys = { w:false, s:false, arrowup:false, arrowdown:false };
+  const left  = { x: PADDLE_MARGIN, y: (H-PADDLE_H)/2, vy: 0, score: 0 };
+  const right = { x: W - PADDLE_MARGIN - PADDLE_W, y: (H-PADDLE_H)/2, vy: 0, score: 0 };
+  const ball  = { x: W/2, y: H/2, vx: 0, vy: 0, speed: BALL_SPEED };
+  let running = false, paused = false, servingTo = Math.random() < .5 ? 'R' : 'L', rafId = null;
+
+  let paddleHits = 0;
+
+  // --- Saque y flujo ---
+  function randServe(to) {
+    ball.x = W/2; ball.y = H/2; ball.speed = BALL_SPEED;
+    const dir = to === 'L' ? -1 : 1;
+    const ang = (Math.random()*60 - 30) * (Math.PI/180);
+    ball.vx = Math.cos(ang) * ball.speed * dir;
+    ball.vy = Math.sin(ang) * ball.speed;
+  }
+  function serve(to) {
+    servingTo = to;
+    overlay.style.display = 'grid';
+    overlay.querySelector('.panel').firstChild?.focus?.();
+    running = false; paused = false;
+    randServe(servingTo);
+    updateButtons();
+  }
+  function start() {
+    if (running) return;
+    overlay.style.display = 'none';
+    running = true; paused = false;
+    updateButtons();
+    tick();
+  }
+  function stop() {
+    running = false; paused = false;
+    if (rafId) cancelAnimationFrame(rafId);
+    updateButtons();
+  }
+  function reset(full=true){
+    left.y = (H-PADDLE_H)/2; right.y = (H-PADDLE_H)/2;
+    if (full) { left.score = 0; right.score = 0; drawScore(); }
+    paddleHits = 0;
+    serve(Math.random()<.5?'L':'R');
+    draw();
+  }
+  function checkWin() {
+    if (left.score >= WIN_SCORE || right.score >= WIN_SCORE) {
+      stop();
+      overlay.innerHTML = `<div class="panel">
+        <p style="margin:.2rem 0 .6rem">🏆 Gana ${left.score>right.score?'Izquierda':'Derecha'}</p>
+        <p style="margin:.2rem 0">Pulsa <em>Reiniciar</em> para jugar de nuevo</p>
+      </div>`;
+      overlay.style.display = 'grid';
+      return true;
+    }
+    return false;
+  }
+
+  // --- Utilidades ---
+  function clamp(v, min, max){ return Math.max(min, Math.min(max, v)); }
+  function drawCourt() {
+    ctx.fillStyle = '#081127'; ctx.fillRect(0,0,W,H);
+    ctx.setLineDash([8,12]); ctx.strokeStyle = '#1f2a44'; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(W/2, 0); ctx.lineTo(W/2, H); ctx.stroke();
+    ctx.setLineDash([]); ctx.beginPath(); ctx.arc(W/2, H/2, 60, 0, Math.PI*2); ctx.stroke();
+  }
+  function drawScore() { scoreLEl.textContent = left.score; scoreREl.textContent = right.score; }
+
+  // --- Tarrina de helado (paddle) ---
+  function roundedRectPath(x,y,w,h,r){
+    const rr = Math.min(r, w/2, h/2);
+    ctx.beginPath();
+    ctx.moveTo(x+rr,y);
+    ctx.arcTo(x+w,y,x+w,y+h,rr);
+    ctx.arcTo(x+w,y+h,x,y+h,rr);
+    ctx.arcTo(x,y+h,x,y,rr);
+    ctx.arcTo(x,y,x+w,y,rr);
+    ctx.closePath();
+  }
+  function drawIceTub(p){
+    const x = p.x, y = p.y, w = PADDLE_W, h = PADDLE_H;
+    ctx.save();
+
+    const bodyGrad = ctx.createLinearGradient(0,y,0,y+h);
+    bodyGrad.addColorStop(0, '#fdf6ff');
+    bodyGrad.addColorStop(1, '#d7e4ff');
+    roundedRectPath(x, y+8, w, h-8, 10);
+    ctx.fillStyle = bodyGrad;
+    ctx.fill();
+
+    ctx.fillStyle = '#eef3ff';
+    roundedRectPath(x, y, w, 16, 8);
+    ctx.fill();
+    ctx.strokeStyle = '#c5d2ee';
+    ctx.lineWidth = 1;
+    ctx.stroke();
+
+    // etiqueta
+    if (ctx.ellipse) {
+      ctx.beginPath();
+      ctx.ellipse(x + w/2, y + h/2 + 4, w*0.30, 12, 0, 0, Math.PI*2);
+      ctx.fillStyle = 'rgba(56,189,248,.25)';
+      ctx.fill();
+    } else {
+      // fallback
+      roundedRectPath(x + w*0.2, y + h/2 - 8, w*0.6, 16, 8);
+      ctx.fillStyle = 'rgba(56,189,248,.25)';
+      ctx.fill();
+    }
+    ctx.font = '16px "Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",system-ui,sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('🍨', x + w/2, y + h/2 + 4);
+
+    ctx.restore();
+  }
+
+  // --- Helado (pelota) ---
+  function drawIceCreamBall(){
+    const t = performance.now ? performance.now() : Date.now();
+    const hue = (t * 0.06 + paddleHits * 35) % 360;
+    const r = BALL_SIZE * 0.46;
+    const cx = ball.x, cy = ball.y;
+
+    ctx.save();
+    ctx.shadowColor = 'rgba(56,189,248,0.45)';
+    ctx.shadowBlur = 18;
+
+    const grad = ctx.createRadialGradient(cx - r*0.4, cy - r*0.5, r*0.2, cx, cy, r);
+    grad.addColorStop(0, `hsl(${hue}, 95%, 78%)`);
+    grad.addColorStop(1, `hsl(${hue}, 85%, 60%)`);
+    ctx.beginPath();
+    ctx.arc(cx, cy, r, 0, Math.PI*2);
+    ctx.fillStyle = grad;
+    ctx.fill();
+
+    ctx.beginPath();
+    ctx.arc(cx - r*0.35, cy - r*0.35, r*0.25, 0, Math.PI*2);
+    ctx.fillStyle = 'rgba(255,255,255,0.55)';
+    ctx.fill();
+
+    ctx.beginPath();
+    ctx.moveTo(cx - r*0.8, cy + r*0.6);
+    ctx.lineTo(cx + r*0.8, cy + r*0.6);
+    ctx.lineWidth = 3;
+    ctx.strokeStyle = 'rgba(255, 247, 230, .8)';
+    ctx.stroke();
+
+    ctx.restore();
+  }
+
+  // --- Movimiento de paddles ---
+  function paddleMove() {
+    left.vy  = (keys.w ? -PADDLE_SPEED : 0) + (keys.s ? PADDLE_SPEED : 0);
+    right.vy = (keys.arrowup ? -PADDLE_SPEED : 0) + (keys.arrowdown ? PADDLE_SPEED : 0);
+    left.y = clamp(left.y + left.vy, 0, H - PADDLE_H);
+    right.y= clamp(right.y + right.vy, 0, H - PADDLE_H);
+  }
+
+  // --- Colisiones ---
+  function rectsIntersect(ax,ay,aw,ah, bx,by,bw,bh){
+    return ax < bx + bw && ax + aw > bx && ay < by + bh && ay + ah > by;
+  }
+  function reflectFromPaddle(paddle) {
+    const rel = ((ball.y - (paddle.y + PADDLE_H/2)) / (PADDLE_H/2));
+    const maxBounce = 60 * (Math.PI/180);
+    const bounceAngle = rel * maxBounce;
+    const dir = paddle === left ? 1 : -1;
+    ball.speed *= SPEED_INC;
+    ball.vx = Math.cos(bounceAngle) * ball.speed * dir;
+    ball.vy = Math.sin(bounceAngle) * ball.speed;
+    paddleHits++;
+  }
+  function updateBall() {
+    ball.x += ball.vx; ball.y += ball.vy;
+
+    const half = BALL_SIZE/2;
+    if (ball.y - half <= 0 && ball.vy < 0) { ball.y = half; ball.vy *= -1; }
+    if (ball.y + half >= H && ball.vy > 0) { ball.y = H - half; ball.vy *= -1; }
+
+    const r = { x: ball.x - half, y: ball.y - half, w: BALL_SIZE, h: BALL_SIZE };
+    if (rectsIntersect(r.x,r.y,r.w,r.h, left.x,left.y,PADDLE_W,PADDLE_H) && ball.vx < 0) {
+      ball.x = left.x + PADDLE_W + half; reflectFromPaddle(left);
+    }
+    if (rectsIntersect(r.x,r.y,r.w,r.h, right.x,right.y,PADDLE_W,PADDLE_H) && ball.vx > 0) {
+      ball.x = right.x - half; reflectFromPaddle(right);
+    }
+
+    if (ball.x < -BALL_SIZE) {
+      right.score++; drawScore();
+      if (!checkWin()) { paddleHits = 0; serve('R'); }
+    } else if (ball.x > W + BALL_SIZE) {
+      left.score++; drawScore();
+      if (!checkWin()) { paddleHits = 0; serve('L'); }
+    }
+  }
+
+  // --- Bucle principal ---
+  function update(){ if (!paused) { paddleMove(); updateBall(); } }
+  function draw(){
+    try{
+      drawCourt();
+      drawIceTub(left);
+      drawIceTub(right);
+      drawIceCreamBall();
+    } catch(e){
+      // si el dibujo falla por algo raro, no bloquear el juego
+      console.error(e);
+    }
+  }
+  function tick(){ if (!running) return; update(); draw(); rafId = requestAnimationFrame(tick); }
+
+  // --- Teclado ---
+  window.addEventListener('keydown', (e) => {
+    const k = (e.key || '').toLowerCase();
+    if (k==='w') { keys.w = true; e.preventDefault(); }
+    if (k==='s') { keys.s = true; e.preventDefault(); }
+    if (k==='arrowup') { keys.arrowup = true; e.preventDefault(); }
+    if (k==='arrowdown') { keys.arrowdown = true; e.preventDefault(); }
+    if (k===' ' || k==='spacebar' || k==='enter') { if (!running && !paused) start(); }
+    if (k==='p') togglePause();
+    if (k==='r') reset(true);
+  });
+  window.addEventListener('keyup', (e) => {
+    const k = (e.key || '').toLowerCase();
+    if (k==='w') { keys.w = false; e.preventDefault(); }
+    if (k==='s') { keys.s = false; e.preventDefault(); }
+    if (k==='arrowup') { keys.arrowup = false; e.preventDefault(); }
+    if (k==='arrowdown') { keys.arrowdown = false; e.preventDefault(); }
+  });
+
+  // --- Touch & Mouse ---
+  const activeTouches = new Map();
+  function canvasRect(){ return canvas.getBoundingClientRect(); }
+  function yFromEventPoint(clientY){ const r = canvasRect(); return clamp((clientY - r.top) * (H / r.height) - PADDLE_H/2, 0, H - PADDLE_H); }
+  function sideFromX(clientX){ const r = canvasRect(); const x = (clientX - r.left) * (W / r.width); return x < W/2 ? 'L' : 'R'; }
+
+  function handleTouchStart(e){
+    e.preventDefault();
+    if (!running && !paused) start();
+    for (const t of e.changedTouches){
+      const side = sideFromX(t.clientX);
+      activeTouches.set(t.identifier, side);
+      if (side === 'L') left.y = yFromEventPoint(t.clientY);
+      else right.y = yFromEventPoint(t.clientY);
+    }
+  }
+  function handleTouchMove(e){
+    e.preventDefault();
+    for (const t of e.changedTouches){
+      const side = activeTouches.get(t.identifier) || sideFromX(t.clientX);
+      if (side === 'L') left.y = yFromEventPoint(t.clientY);
+      else right.y = yFromEventPoint(t.clientY);
+    }
+  }
+  function handleTouchEnd(e){
+    e.preventDefault();
+    for (const t of e.changedTouches) activeTouches.delete(t.identifier);
+  }
+
+  canvas.addEventListener('touchstart', handleTouchStart, {passive:false});
+  canvas.addEventListener('touchmove', handleTouchMove,   {passive:false});
+  canvas.addEventListener('touchend', handleTouchEnd,     {passive:false});
+  canvas.addEventListener('touchcancel', handleTouchEnd,  {passive:false});
+
+  let mouseDown = false, mouseSide = 'L';
+  canvas.addEventListener('mousedown', (e)=>{ mouseDown = true; mouseSide = sideFromX(e.clientX); if (!running && !paused) start(); });
+  canvas.addEventListener('mousemove', (e)=>{ if (!mouseDown) return; const y = yFromEventPoint(e.clientY); if (mouseSide==='L') left.y=y; else right.y=y; });
+  window.addEventListener('mouseup', ()=>{ mouseDown = false; });
+
+  // --- Arranque universal ---
+  // clic en overlay, botón, documento entero
+  overlay.addEventListener('click', () => { if (!running && !paused) start(); });
+  document.addEventListener('click', (e) => {
+    // evita que el clic en los propios botones pause/reset interfiera
+    const id = (e.target && e.target.id) || '';
+    if (id==='serveBtn' || id==='pauseBtn' || id==='resetBtn') return;
+    if (!running && !paused) start();
+  });
+
+  // --- Botones ---
+  serveBtn.addEventListener('click', ()=>{ if (!running && !paused) start(); });
+  pauseBtn.addEventListener('click', togglePause);
+  resetBtn.addEventListener('click', ()=> reset(true));
+
+  function togglePause(){
+    if (!running) return; paused = !paused;
+    if (paused) {
+      overlay.innerHTML = `<div class="panel"><p>Pausa</p><p>Pulsa <em>Pausa</em> otra vez para reanudar</p></div>`;
+      overlay.style.display = 'grid';
+    } else overlay.style.display = 'none';
+    updateButtons();
+  }
+  function updateButtons(){
+    serveBtn.disabled = running || paused ? true : false;
+    pauseBtn.textContent = paused ? '▶ Reanudar' : '⏸︎ Pausa';
+  }
+
+  // Inicio
+  reset(true);
+  app.focus();
+})();
+</script>
+</body>
+</html>
